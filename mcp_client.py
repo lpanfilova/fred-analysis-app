@@ -2,18 +2,11 @@ import asyncio
 import argparse
 import json
 from pathlib import Path
-from mcp import Client
 from oauth_login import BrowserLogin
-from oauth_storage import KeychainTokenStorage, PersistentOAuthClientProvider
+from fred_connection import FRED_MCP_URL, connect_fred
 from fred_service import get_comparison_analysis, get_series_analysis
 from analytics import parse_date
 
-import httpx2
-from pydantic import AnyUrl
-from mcp.client.streamable_http import streamable_http_client
-from mcp.shared.auth import OAuthClientMetadata
-
-FRED_MCP_URL = "https://mcp.stlouisfed.org"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Analyze nominal GDP and Core CPI through FRED MCP.")
@@ -60,57 +53,35 @@ async def main(args):
 
 
 async def run_client(login, args, chat_settings=None):
-    oauth = PersistentOAuthClientProvider(
-        server_url=FRED_MCP_URL,
-        client_metadata=OAuthClientMetadata(
-            client_name="FRED Analysis App",
-            redirect_uris=[AnyUrl(login.redirect_uri)],
-            grant_types=["authorization_code", "refresh_token"],
-        ),
-        storage=KeychainTokenStorage(FRED_MCP_URL),
-        redirect_handler=login.handle_redirect,
-        callback_handler=login.handle_callback
-    )
-
-    async with httpx2.AsyncClient(
-        auth = oauth,
-        timeout = httpx2.Timeout(30.0, read=300.0)
-    ) as http_client:
-
-        transport = streamable_http_client(
-            FRED_MCP_URL,
-            http_client=http_client
-        )
-
-        async with Client(transport) as client:
-            if args.chat:
-                from chat import run_terminal_chat
-                await run_terminal_chat(client, *chat_settings)
-                return
-            if args.compare or args.chart:
-                bounds = (
-                    {"start": args.start, "end": args.end}
-                    if args.start is not None or args.end is not None
-                    else {"years": args.years if args.years is not None else 10}
-                )
-                report = await get_comparison_analysis(client, **bounds)
-                if args.chart:
-                    from visualization import save_comparison_chart
-                    report["chart_path"] = str(save_comparison_chart(report, args.chart))
-                if not args.history:
-                    report.pop("history")
-                print(json.dumps(report, indent=2, allow_nan=False))
-                return
-            for series_id, default_years in (("GDP", 10), ("CPILFESL", 5)):
-                bounds = (
-                    {"start": args.start, "end": args.end}
-                    if args.start is not None or args.end is not None
-                    else {"years": default_years}
-                )
-                report = await get_series_analysis(client, series_id, **bounds)
-                if not args.history:
-                    report.pop("history")
-                print(json.dumps(report, indent=2, allow_nan=False))
+    async with connect_fred(login) as client:
+        if args.chat:
+            from chat import run_terminal_chat
+            await run_terminal_chat(client, *chat_settings)
+            return
+        if args.compare or args.chart:
+            bounds = (
+                {"start": args.start, "end": args.end}
+                if args.start is not None or args.end is not None
+                else {"years": args.years if args.years is not None else 10}
+            )
+            report = await get_comparison_analysis(client, **bounds)
+            if args.chart:
+                from visualization import save_comparison_chart
+                report["chart_path"] = str(save_comparison_chart(report, args.chart))
+            if not args.history:
+                report.pop("history")
+            print(json.dumps(report, indent=2, allow_nan=False))
+            return
+        for series_id, default_years in (("GDP", 10), ("CPILFESL", 5)):
+            bounds = (
+                {"start": args.start, "end": args.end}
+                if args.start is not None or args.end is not None
+                else {"years": default_years}
+            )
+            report = await get_series_analysis(client, series_id, **bounds)
+            if not args.history:
+                report.pop("history")
+            print(json.dumps(report, indent=2, allow_nan=False))
 
 if __name__ == "__main__":
     try:
