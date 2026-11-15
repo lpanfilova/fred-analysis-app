@@ -3,6 +3,7 @@
 import json
 
 from analytics import SERIES, analyze_series
+from comparison import compare_series
 
 
 async def _call(client, tool, series_id):
@@ -63,3 +64,10 @@ async def get_series_analysis(client, series_id, *, start=None, end=None, years=
         raise ValueError("Supported series are GDP and CPILFESL.")
     data = await get_observations(client, series_id)
     return analyze_series(data, series_id, start=start, end=end, years=years)
+
+
+async def get_comparison_analysis(client, *, start=None, end=None, years=None):
+    """Fetch both complete histories and compare their quarterly growth rates."""
+    gdp = await get_observations(client, "GDP")
+    cpi = await get_observations(client, "CPILFESL")
+    return compare_series(gdp, cpi, start=start, end=end, years=years)
