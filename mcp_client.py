@@ -23,8 +23,14 @@ def parse_args():
     parser.add_argument("--compare", action="store_true", help="Compare quarterly GDP growth and Core CPI inflation; bounds include full quarters only.")
     parser.add_argument("--years", type=int, help="Rolling comparison window in years (default: 10); cannot combine with date bounds.")
     parser.add_argument("--chart", type=Path, help="Export a comparison chart, e.g. outputs/comparison.png (PNG, SVG, or PDF); implies --compare.")
+    parser.add_argument("--chat", action="store_true", help="Start an AI conversation about GDP and Core CPI.")
+    parser.add_argument("--model", help="OpenAI model for --chat (or OPENAI_MODEL in .env).")
     args = parser.parse_args()
     try:
+        if args.chat and any((args.start, args.end, args.history, args.compare, args.years is not None, args.chart)):
+            raise ValueError("Use --chat alone and specify dates or charts in the conversation.")
+        if args.model and not args.chat:
+            raise ValueError("--model requires --chat.")
         start = parse_date(args.start) if args.start is not None else None
         end = parse_date(args.end) if args.end is not None else None
         if start is not None and end is not None and start > end:
@@ -42,11 +48,18 @@ def parse_args():
 
 
 async def main(args):
+    settings = None
+    if args.chat:
+        from chat import ChatError, load_chat_settings
+        try:
+            settings = load_chat_settings(args.model)
+        except ChatError as exc:
+            raise SystemExit(str(exc)) from None
     async with BrowserLogin() as login:
-        await run_client(login, args)
+        await run_client(login, args, settings)
 
 
-async def run_client(login, args):
+async def run_client(login, args, chat_settings=None):
     oauth = PersistentOAuthClientProvider(
         server_url=FRED_MCP_URL,
         client_metadata=OAuthClientMetadata(
@@ -70,6 +83,10 @@ async def run_client(login, args):
         )
 
         async with Client(transport) as client:
+            if args.chat:
+                from chat import run_terminal_chat
+                await run_terminal_chat(client, *chat_settings)
+                return
             if args.compare or args.chart:
                 bounds = (
                     {"start": args.start, "end": args.end}
@@ -96,4 +113,7 @@ async def run_client(login, args):
                 print(json.dumps(report, indent=2, allow_nan=False))
 
 if __name__ == "__main__":
-    asyncio.run(main(parse_args()))
+    try:
+        asyncio.run(main(parse_args()))
+    except KeyboardInterrupt:
+        print("\nGoodbye.")

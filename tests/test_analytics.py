@@ -80,6 +80,9 @@ class AnalyticsTests(unittest.TestCase):
         data = observations("2020-01-01", "2021-01-01", "QS-JAN")
         report = analyze_series(data, "GDP")
         self.assertEqual(report["latest"]["observation_date"], "2021-01-01")
+        self.assertEqual(report["latest"]["observation_period"], "2021Q1")
+        self.assertEqual(report["latest"]["period_start"], "2021-01-01")
+        self.assertEqual(report["latest"]["period_end"], "2021-03-31")
         self.assertEqual(report["latest"]["level"], 104)
         self.assertAlmostEqual(report["latest"]["yoy_percent"], 4)
         self.assertAlmostEqual(report["latest"]["qoq_annualized_percent"], ((104 / 103) ** 4 - 1) * 100)
@@ -103,6 +106,8 @@ class AnalyticsTests(unittest.TestCase):
         report = analyze_series(data, "CPILFESL")
         self.assertEqual(report["latest"]["observation_date"], "2021-02-01")
         self.assertIsNone(report["latest"]["yoy_percent"])
+        self.assertEqual(report["latest_available_yoy"]["observation_date"], "2021-01-01")
+        self.assertAlmostEqual(report["latest_available_yoy"]["yoy_percent"], 12)
         self.assertTrue(report["warnings"])
         json.dumps(report, allow_nan=False)
 

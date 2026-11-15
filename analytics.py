@@ -137,10 +137,15 @@ def analyze_series(data, series_id, *, start=None, end=None, years=None):
         raise ValueError(f"No usable {series_id} observations in the requested date range.")
 
     def point(timestamp, row):
+        period = timestamp.to_period("Q" if series_id == "GDP" else "M")
         return {"observation_date": timestamp.date().isoformat(),
+                "observation_period": str(period),
+                "period_start": period.start_time.date().isoformat(),
+                "period_end": period.end_time.date().isoformat(),
                 **{key: _number(value) for key, value in row.items()}}
 
     first, last = valid.iloc[0], valid.iloc[-1]
+    available_rates = selected.dropna(subset=["yoy_percent"])
     summary = {
         "first_observation_date": valid.index[0].date().isoformat(),
         "last_observation_date": valid.index[-1].date().isoformat(),
@@ -170,6 +175,10 @@ def analyze_series(data, series_id, *, start=None, end=None, years=None):
         "requested_range": {"start": start_date.date().isoformat() if start_date is not None else None,
                             "end": end_date.date().isoformat() if end_date is not None else None},
         "latest": point(valid.index[-1], last), "summary": summary,
+        "latest_available_yoy": (
+            point(available_rates.index[-1], available_rates.iloc[-1])
+            if not available_rates.empty else None
+        ),
         "history": [point(timestamp, row) for timestamp, row in selected.iterrows()],
         "warnings": warnings,
     }
