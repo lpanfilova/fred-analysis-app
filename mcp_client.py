@@ -1,42 +1,33 @@
 import asyncio
-import json
 from mcp import Client
-from oauth_storage import InMemoryTokenStorage
+from oauth_login import BrowserLogin
+from oauth_storage import KeychainTokenStorage, PersistentOAuthClientProvider
+from fred_service import get_observations
+from analytics import prepare_data, calculate_yoy
 
 import httpx2
 from pydantic import AnyUrl
-from urllib.parse import urlparse, parse_qs
-
-from mcp.client.auth import OAuthClientProvider, AuthorizationCodeResult
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientMetadata
 
 FRED_MCP_URL = "https://mcp.stlouisfed.org"
 
-async def handle_redirect(auth_url: str):
-    print(f"Open this URL in your browser:\n{auth_url}")
-
-async def handle_callback() -> AuthorizationCodeResult:
-    callback_url = input("Paste the redirected URL: ")
-
-    params = parse_qs(urlparse(callback_url).query)
-
-    return AuthorizationCodeResult(
-        code=params["code"][0],
-        state=params["state"][0],
-        iss=params.get("iss", [None])[0]
-    )
-
 async def main():
-    oauth = OAuthClientProvider(
+    async with BrowserLogin() as login:
+        await run_client(login)
+
+
+async def run_client(login):
+    oauth = PersistentOAuthClientProvider(
         server_url=FRED_MCP_URL,
         client_metadata=OAuthClientMetadata(
             client_name="FRED Analysis App",
-            redirect_uris=[AnyUrl("http://localhost:3030/callback")]
+            redirect_uris=[AnyUrl(login.redirect_uri)],
+            grant_types=["authorization_code", "refresh_token"],
         ),
-        storage=InMemoryTokenStorage(),
-        redirect_handler=handle_redirect,
-        callback_handler=handle_callback
+        storage=KeychainTokenStorage(FRED_MCP_URL),
+        redirect_handler=login.handle_redirect,
+        callback_handler=login.handle_callback
     )
 
     async with httpx2.AsyncClient(
@@ -50,10 +41,24 @@ async def main():
         )
 
         async with Client(transport) as client:
-            result = await client.list_tools()
 
-            for tool in result.tools:
-                print(tool.name)
+            gdp = await get_observations(client, "GDP")
+            cpi = await get_observations(client, "CPILFESL")
+
+            gdp_series = prepare_data(gdp)
+            cpi_series = prepare_data(cpi)
+
+            gdp_growth = calculate_yoy(gdp_series, 4)
+            cpi_inflation = calculate_yoy(cpi_series, 12)
+
+            print("Latest GDP growth:")
+            print(gdp_growth.dropna().tail(1))
+
+            print("Latest Core CPI inflation:")
+            print(cpi_inflation.dropna().tail(1))
+
+            print("GDP:", len(gdp["observations"]), "observations")
+            print("CPI:", len(cpi["observations"]), "observations")
 
 if __name__ == "__main__":
     asyncio.run(main())
